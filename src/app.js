@@ -10,7 +10,7 @@ const userRoutes = require('./routes/user.routes');
 const incomeRoutes = require('./routes/income.routes');
 const expenseRoutes = require('./routes/expense.routes');
 const reportRoutes = require('./routes/report.routes');
-const groupRoutes = require('./routes/group.routes');       // ← new
+const groupRoutes = require('./routes/group.routes');
 const adminIncomeRoutes = require('./routes/admin.income.routes');
 const categoryRoutes = require('./routes/category.routes');
 const errorHandler = require('./middleware/errorHandler');
@@ -18,6 +18,10 @@ const notFound = require('./middleware/notFound');
 const adminExpenseRoutes = require('./routes/admin.expense.routes');
 
 const app = express();
+
+// ── Trust Render's reverse proxy ──────────────────────────
+// Must be set before any middleware that reads req.ip
+app.set('trust proxy', 1);
 
 // ── Security ─────────────────────────────────────────────
 app.use(helmet());
@@ -35,6 +39,9 @@ app.use(rateLimit({
   message: { success: false, message: 'Too many requests, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
+  // Use the real client IP forwarded by Render's proxy, not the proxy's IP
+  keyGenerator: (req) =>
+    req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip,
 }));
 
 // ── Parsers ───────────────────────────────────────────────
@@ -54,16 +61,16 @@ app.get('/health', (req, res) => {
 // ── API Routes ────────────────────────────────────────────
 const API = '/api/v1';
 
-app.use(`${API}/auth`,     authRoutes);
-app.use(`${API}/users`,    userRoutes);
-app.use(`${API}/branches`, branchRoutes);
-app.use(`${API}/branches`, incomeRoutes);   // /api/v1/branches/:branchId/incomes
-app.use(`${API}/branches`, expenseRoutes);  // /api/v1/branches/:branchId/expenses
-app.use(`${API}/reports`,  reportRoutes);   // /api/v1/reports/group/* and /api/v1/reports/branch/*
-app.use(`${API}/group`,    groupRoutes);    // /api/v1/group/summary  ← new
-app.use(`${API}/admin`, adminIncomeRoutes);  // /api/v1/admin/incomes
+app.use(`${API}/auth`,       authRoutes);
+app.use(`${API}/users`,      userRoutes);
+app.use(`${API}/branches`,   branchRoutes);
+app.use(`${API}/branches`,   incomeRoutes);       // /api/v1/branches/:branchId/incomes
+app.use(`${API}/branches`,   expenseRoutes);      // /api/v1/branches/:branchId/expenses
+app.use(`${API}/reports`,    reportRoutes);       // /api/v1/reports/group/* and /api/v1/reports/branch/*
+app.use(`${API}/group`,      groupRoutes);        // /api/v1/group/summary
+app.use(`${API}/admin`,      adminIncomeRoutes);  // /api/v1/admin/incomes
 app.use(`${API}/categories`, categoryRoutes);
-app.use(`${API}/admin`, adminExpenseRoutes);  // ← backticks
+app.use(`${API}/admin`,      adminExpenseRoutes); // /api/v1/admin/expenses
 
 // ── Error handling ────────────────────────────────────────
 app.use(notFound);
