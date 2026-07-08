@@ -20,14 +20,13 @@ const adminExpenseRoutes = require('./routes/admin.expense.routes');
 const app = express();
 
 // ── Trust Render's reverse proxy ──────────────────────────
-// Must be set before any middleware that reads req.ip
 app.set('trust proxy', 1);
 
 // ── Security ─────────────────────────────────────────────
 app.use(helmet());
 
 app.use(cors({
-  origin: process.env.CLIENT_URL || '*',
+  origin: (origin, callback) => callback(null, true), // allow all origins
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
@@ -39,7 +38,6 @@ app.use(rateLimit({
   message: { success: false, message: 'Too many requests, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
-  // Use the real client IP forwarded by Render's proxy, not the proxy's IP
   keyGenerator: (req) =>
     req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip,
 }));
@@ -64,13 +62,13 @@ const API = '/api/v1';
 app.use(`${API}/auth`,       authRoutes);
 app.use(`${API}/users`,      userRoutes);
 app.use(`${API}/branches`,   branchRoutes);
-app.use(`${API}/branches`,   incomeRoutes);       // /api/v1/branches/:branchId/incomes
-app.use(`${API}/branches`,   expenseRoutes);      // /api/v1/branches/:branchId/expenses
-app.use(`${API}/reports`,    reportRoutes);       // /api/v1/reports/group/* and /api/v1/reports/branch/*
-app.use(`${API}/group`,      groupRoutes);        // /api/v1/group/summary
-app.use(`${API}/admin`,      adminIncomeRoutes);  // /api/v1/admin/incomes
+app.use(`${API}/branches`,   incomeRoutes);
+app.use(`${API}/branches`,   expenseRoutes);
+app.use(`${API}/reports`,    reportRoutes);
+app.use(`${API}/group`,      groupRoutes);
+app.use(`${API}/admin`,      adminIncomeRoutes);
 app.use(`${API}/categories`, categoryRoutes);
-app.use(`${API}/admin`,      adminExpenseRoutes); // /api/v1/admin/expenses
+app.use(`${API}/admin`,      adminExpenseRoutes);
 
 // ── Error handling ────────────────────────────────────────
 app.use(notFound);
