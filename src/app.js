@@ -26,7 +26,10 @@ app.set('trust proxy', 1);
 app.use(helmet());
 
 app.use(cors({
-  origin: (origin, callback) => callback(null, true), // allow all origins
+  origin: function(origin, callback) {
+    if (!origin) return callback(null, true);
+    return callback(null, true); // allow all
+  },
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
