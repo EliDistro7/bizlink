@@ -7,6 +7,8 @@ const { success, error } = require('../utils/apiResponse');
 // super_admin: all users; branch_manager: only users in their branch
 const listUsers = async (req, res) => {
   try {
+      const allUsers = await User.find();
+    console.log('All users:', allUsers);
     const { role, branchId } = req.user;
 
     const filter = role === 'super_admin' ? {} : { branchId };
@@ -65,6 +67,7 @@ const createUser = async (req, res) => {
 // GET /api/v1/users/:id
 const getUser = async (req, res) => {
   try {
+  
     const user = await User.findById(req.params.id);
     if (!user) return error(res, 'User not found', 404);
 

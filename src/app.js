@@ -4,31 +4,37 @@ const cors = require('cors');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 
-const authRoutes = require('./routes/auth.routes');
-const branchRoutes = require('./routes/branch.routes');
-const userRoutes = require('./routes/user.routes');
-const incomeRoutes = require('./routes/income.routes');
-const expenseRoutes = require('./routes/expense.routes');
-const reportRoutes = require('./routes/report.routes');
-const groupRoutes = require('./routes/group.routes');
-const adminIncomeRoutes = require('./routes/admin.income.routes');
-const categoryRoutes = require('./routes/category.routes');
-const errorHandler = require('./middleware/errorHandler');
-const notFound = require('./middleware/notFound');
+const authRoutes         = require('./routes/auth.routes');
+const branchRoutes       = require('./routes/branch.routes');
+const userRoutes         = require('./routes/user.routes');
+const incomeRoutes       = require('./routes/income.routes');
+const expenseRoutes      = require('./routes/expense.routes');
+const reportRoutes       = require('./routes/report.routes');
+const groupRoutes        = require('./routes/group.routes');
+const adminIncomeRoutes  = require('./routes/admin.income.routes');
+const categoryRoutes     = require('./routes/category.routes');
 const adminExpenseRoutes = require('./routes/admin.expense.routes');
+const adminSaleRoutes    = require('./routes/admin.sale.routes');
+const adminPurchaseRoutes = require('./routes/admin.purchase.routes');
+const adminProductRoutes  = require('./routes/admin.product.routes');
+
+// ── Inventory ────────────────────────────────────────────
+const productRoutes  = require('./routes/product.routes');
+const saleRoutes     = require('./routes/sale.routes');
+const purchaseRoutes = require('./routes/purchase.routes');
+
+const errorHandler = require('./middleware/errorHandler');
+const notFound     = require('./middleware/notFound');
 
 const app = express();
 
-// ── Trust Render's reverse proxy ──────────────────────────
 app.set('trust proxy', 1);
 
-// ── Security ─────────────────────────────────────────────
 app.use(helmet());
-
 app.use(cors({
   origin: function(origin, callback) {
     if (!origin) return callback(null, true);
-    return callback(null, true); // allow all
+    return callback(null, true);
   },
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -41,25 +47,20 @@ app.use(rateLimit({
   message: { success: false, message: 'Too many requests, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) =>
-    req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip,
+  keyGenerator: (req) => req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip,
 }));
 
-// ── Parsers ───────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ── Logging ───────────────────────────────────────────────
 if (process.env.NODE_ENV !== 'test') {
   app.use(morgan('combined'));
 }
 
-// ── Health check ──────────────────────────────────────────
 app.get('/health', (req, res) => {
   res.json({ success: true, status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// ── API Routes ────────────────────────────────────────────
 const API = '/api/v1';
 
 app.use(`${API}/auth`,       authRoutes);
@@ -72,8 +73,14 @@ app.use(`${API}/group`,      groupRoutes);
 app.use(`${API}/admin`,      adminIncomeRoutes);
 app.use(`${API}/categories`, categoryRoutes);
 app.use(`${API}/admin`,      adminExpenseRoutes);
+// ── Inventory ────────────────────────────────────────────
+app.use(`${API}/branches`,   productRoutes);
+app.use(`${API}/branches`,   saleRoutes);
+app.use(`${API}/branches`,   purchaseRoutes);
+app.use(`${API}/admin`,      adminSaleRoutes);
+app.use(`${API}/admin`,      adminPurchaseRoutes);
+app.use(`${API}/admin`,      adminProductRoutes);
 
-// ── Error handling ────────────────────────────────────────
 app.use(notFound);
 app.use(errorHandler);
 

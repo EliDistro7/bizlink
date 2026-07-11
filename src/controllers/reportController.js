@@ -7,24 +7,11 @@ const { success, error } = require('../utils/apiResponse');
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-/**
- * Sum a numeric field across an aggregation result array, keyed by _id.
- * Returns a plain object: { <id>: total, ... }
- */
 const toMap = (aggResult, field = 'total') =>
   Object.fromEntries(aggResult.map((r) => [r._id.toString(), r[field]]));
 
-/**
- * Run income + expense totals for a given branchId and date range.
- *
- * FIX: branchId must be cast to ObjectId before being used in an aggregation
- * $match. Passing a plain string works with Mongoose .find() (Mongoose coerces
- * it) but silently returns 0 results inside an aggregate $match pipeline
- * because aggregation bypasses schema casting. This caused groupSummary to
- * return zeros for every branch even when data existed.
- *
- * Returns { totalIncome, totalExpenses, netProfit }
- */
+const toOid = (id) => mongoose.Types.ObjectId.createFromHexString(id);
+
 const calcPnl = async (branchObjectId, dateRange) => {
   const dateMatch = { $gte: dateRange.startDate, $lte: dateRange.endDate };
 
@@ -32,7 +19,7 @@ const calcPnl = async (branchObjectId, dateRange) => {
     Income.aggregate([
       {
         $match: {
-          branchId: branchObjectId,   // ObjectId — not a string
+          branchId: branchObjectId,
           isVoided: false,
           transactionDate: dateMatch,
         },
@@ -42,7 +29,7 @@ const calcPnl = async (branchObjectId, dateRange) => {
     Expense.aggregate([
       {
         $match: {
-          branchId: branchObjectId,   // ObjectId — not a string
+          branchId: branchObjectId,
           isVoided: false,
           status: 'approved',
           transactionDate: dateMatch,
@@ -52,8 +39,8 @@ const calcPnl = async (branchObjectId, dateRange) => {
     ]),
   ]);
 
-  const totalIncome = incomeAgg[0]?.total ?? 0;
-  const totalExpenses = expenseAgg[0]?.total ?? 0;
+  const totalIncome   = incomeAgg[0]?.total   ?? 0;
+  const totalExpenses = expenseAgg[0]?.total   ?? 0;
   return { totalIncome, totalExpenses, netProfit: totalIncome - totalExpenses };
 };
 
@@ -61,18 +48,16 @@ const calcPnl = async (branchObjectId, dateRange) => {
 
 /**
  * GET /api/v1/reports/branch/:branchId/summary
- * High-level P&L for a single branch over a date range.
- * Accessible to: super_admin, branch_manager (own branch), cashier (own branch).
  */
 const branchSummary = async (req, res) => {
   try {
     const { branchId } = req.params;
-    const dateRange = resolveDateRange(req.query);
-    const branchOid = mongoose.Types.ObjectId.createFromHexString(branchId);
+    const dateRange  = resolveDateRange(req.query);
+    const branchOid  = toOid(branchId);
 
     const [pnl, pendingCount] = await Promise.all([
       calcPnl(branchOid, dateRange),
-      Expense.countDocuments({ branchId, status: 'pending', isVoided: false }),
+      Expense.countDocuments({ branchId: branchOid, status: 'pending', isVoided: false }),
     ]);
 
     return success(res, {
@@ -82,14 +67,13 @@ const branchSummary = async (req, res) => {
       pendingExpensesCount: pendingCount,
     });
   } catch (err) {
-    console.error('[reports/branch/summary]', err);
+    console.error('[reports/branch/summary]', err.message, err.stack);
     return error(res, 'Server error', 500);
   }
 };
 
 /**
  * GET /api/v1/reports/branch/:branchId/income-by-category
- * Income totals grouped by categoryId for a branch.
  */
 const branchIncomeByCategory = async (req, res) => {
   try {
@@ -99,7 +83,7 @@ const branchIncomeByCategory = async (req, res) => {
     const agg = await Income.aggregate([
       {
         $match: {
-          branchId: mongoose.Types.ObjectId.createFromHexString(branchId),
+          branchId: toOid(branchId),
           isVoided: false,
           transactionDate: { $gte: dateRange.startDate, $lte: dateRange.endDate },
         },
@@ -113,7 +97,7 @@ const branchIncomeByCategory = async (req, res) => {
           as: 'category',
         },
       },
-      { $unwind: { path: '$category', preserveNullAndEmpty: true } },
+      { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
       { $sort: { total: -1 } },
       {
         $project: {
@@ -132,14 +116,13 @@ const branchIncomeByCategory = async (req, res) => {
       breakdown: agg,
     });
   } catch (err) {
-    console.error('[reports/branch/income-by-category]', err);
+    console.error('[reports/branch/income-by-category]', err.message, err.stack);
     return error(res, 'Server error', 500);
   }
 };
 
 /**
  * GET /api/v1/reports/branch/:branchId/expense-by-category
- * Approved expense totals grouped by categoryId for a branch.
  */
 const branchExpenseByCategory = async (req, res) => {
   try {
@@ -149,7 +132,7 @@ const branchExpenseByCategory = async (req, res) => {
     const agg = await Expense.aggregate([
       {
         $match: {
-          branchId: mongoose.Types.ObjectId.createFromHexString(branchId),
+          branchId: toOid(branchId),
           isVoided: false,
           status: 'approved',
           transactionDate: { $gte: dateRange.startDate, $lte: dateRange.endDate },
@@ -164,7 +147,7 @@ const branchExpenseByCategory = async (req, res) => {
           as: 'category',
         },
       },
-      { $unwind: { path: '$category', preserveNullAndEmpty: true } },
+      { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
       { $sort: { total: -1 } },
       {
         $project: {
@@ -183,26 +166,24 @@ const branchExpenseByCategory = async (req, res) => {
       breakdown: agg,
     });
   } catch (err) {
-    console.error('[reports/branch/expense-by-category]', err);
+    console.error('[reports/branch/expense-by-category]', err.message, err.stack);
     return error(res, 'Server error', 500);
   }
 };
 
 /**
  * GET /api/v1/reports/branch/:branchId/daily-totals
- * Day-by-day income and expense totals within the date range.
  */
 const branchDailyTotals = async (req, res) => {
   try {
     const { branchId } = req.params;
-    const dateRange = resolveDateRange(req.query);
-
-    const branchOid = mongoose.Types.ObjectId.createFromHexString(branchId);
-    const dateMatch = { $gte: dateRange.startDate, $lte: dateRange.endDate };
+    const dateRange  = resolveDateRange(req.query);
+    const branchOid  = toOid(branchId);
+    const dateMatch  = { $gte: dateRange.startDate, $lte: dateRange.endDate };
 
     const dateGroup = {
-      year:  { $year: '$transactionDate' },
-      month: { $month: '$transactionDate' },
+      year:  { $year:       '$transactionDate' },
+      month: { $month:      '$transactionDate' },
       day:   { $dayOfMonth: '$transactionDate' },
     };
 
@@ -222,15 +203,15 @@ const branchDailyTotals = async (req, res) => {
     const toDateKey = (r) =>
       `${r._id.year}-${String(r._id.month).padStart(2, '0')}-${String(r._id.day).padStart(2, '0')}`;
 
-    const incomeMap = toMap(incomeDaily.map((r) => ({ _id: toDateKey(r), total: r.total })));
-    const expenseMap = toMap(expenseDaily.map((r) => ({ _id: toDateKey(r), total: r.total })));
+    const incomeMap  = toMap(incomeDaily.map((r)  => ({ _id: toDateKey(r),  total: r.total })));
+    const expenseMap = toMap(expenseDaily.map((r)  => ({ _id: toDateKey(r),  total: r.total })));
 
     const allDays = [...new Set([...Object.keys(incomeMap), ...Object.keys(expenseMap)])].sort();
     const days = allDays.map((date) => ({
       date,
       income:   incomeMap[date]  ?? 0,
       expenses: expenseMap[date] ?? 0,
-      net:      (incomeMap[date] ?? 0) - (expenseMap[date] ?? 0),
+      net:     (incomeMap[date]  ?? 0) - (expenseMap[date] ?? 0),
     }));
 
     return success(res, {
@@ -239,23 +220,23 @@ const branchDailyTotals = async (req, res) => {
       days,
     });
   } catch (err) {
-    console.error('[reports/branch/daily-totals]', err);
+    console.error('[reports/branch/daily-totals]', err.message, err.stack);
     return error(res, 'Server error', 500);
   }
 };
 
 /**
  * GET /api/v1/reports/branch/:branchId/pending-expenses
- * List of pending expenses for a branch (Branch Manager approval queue).
  */
 const branchPendingExpenses = async (req, res) => {
   try {
     const { branchId } = req.params;
+    const branchOid  = toOid(branchId);
     const { page = 1, limit = 20 } = req.query;
 
-    const pageNum  = parseInt(page, 10);
+    const pageNum  = parseInt(page,  10);
     const limitNum = parseInt(limit, 10);
-    const filter   = { branchId, status: 'pending', isVoided: false };
+    const filter   = { branchId: branchOid, status: 'pending', isVoided: false };
 
     const [expenses, total] = await Promise.all([
       Expense.find(filter)
@@ -270,14 +251,14 @@ const branchPendingExpenses = async (req, res) => {
     return success(res, {
       expenses,
       pagination: {
-        page: pageNum,
+        page:  pageNum,
         limit: limitNum,
         total,
         pages: Math.ceil(total / limitNum),
       },
     });
   } catch (err) {
-    console.error('[reports/branch/pending-expenses]', err);
+    console.error('[reports/branch/pending-expenses]', err.message, err.stack);
     return error(res, 'Server error', 500);
   }
 };
@@ -286,21 +267,14 @@ const branchPendingExpenses = async (req, res) => {
 
 /**
  * GET /api/v1/reports/group/summary
- * P&L totals for every active branch side-by-side (branch comparison table).
- *
- * Note: this is a different endpoint from GET /api/v1/group/summary.
- * This one returns a per-branch breakdown array; the other returns the
- * aggregate KPIs consumed by the Flutter GroupDashboardScreen.
  */
 const groupSummary = async (req, res) => {
   try {
     const dateRange = resolveDateRange(req.query);
-
-    const branches = await Branch.find({ isActive: true }).select('_id name location');
+    const branches  = await Branch.find({ isActive: true }).select('_id name location');
 
     const results = await Promise.all(
       branches.map(async (branch) => {
-        // Pass ObjectId directly — no string conversion
         const pnl = await calcPnl(branch._id, dateRange);
         return { branchId: branch._id, name: branch.name, location: branch.location, ...pnl };
       })
@@ -321,28 +295,27 @@ const groupSummary = async (req, res) => {
       branches: results,
     });
   } catch (err) {
-    console.error('[reports/group/summary]', err);
+    console.error('[reports/group/summary]', err.message, err.stack);
     return error(res, 'Server error', 500);
   }
 };
 
 /**
  * GET /api/v1/reports/group/pending-expenses
- * All pending expenses across every branch — for the super_admin dashboard.
  */
 const groupPendingExpenses = async (req, res) => {
   try {
     const { page = 1, limit = 20 } = req.query;
 
-    const pageNum  = parseInt(page, 10);
+    const pageNum  = parseInt(page,  10);
     const limitNum = parseInt(limit, 10);
     const filter   = { status: 'pending', isVoided: false };
 
     const [expenses, total] = await Promise.all([
       Expense.find(filter)
-        .populate('branchId', 'name location')
-        .populate('recordedBy', 'name email')
-        .populate('categoryId', 'name')
+        .populate('branchId',    'name location')
+        .populate('recordedBy',  'name email')
+        .populate('categoryId',  'name')
         .sort({ transactionDate: -1 })
         .skip((pageNum - 1) * limitNum)
         .limit(limitNum),
@@ -352,26 +325,24 @@ const groupPendingExpenses = async (req, res) => {
     return success(res, {
       expenses,
       pagination: {
-        page: pageNum,
+        page:  pageNum,
         limit: limitNum,
         total,
         pages: Math.ceil(total / limitNum),
       },
     });
   } catch (err) {
-    console.error('[reports/group/pending-expenses]', err);
+    console.error('[reports/group/pending-expenses]', err.message, err.stack);
     return error(res, 'Server error', 500);
   }
 };
 
 module.exports = {
-  // branch-scoped
   branchSummary,
   branchIncomeByCategory,
   branchExpenseByCategory,
   branchDailyTotals,
   branchPendingExpenses,
-  // group-wide
   groupSummary,
   groupPendingExpenses,
 };
