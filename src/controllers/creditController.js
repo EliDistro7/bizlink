@@ -21,7 +21,10 @@ const listCredits = async (req, res) => {
 
     const filter = { branchId };
 
-    if (status)     filter.status     = status;
+    if (status) {
+      const statuses = status.split(',').map((s) => s.trim()).filter(Boolean);
+      filter.status = statuses.length === 1 ? statuses[0] : { $in: statuses };
+    }
     if (customerId) filter.customerId = customerId;
 
     if (startDate || endDate) {

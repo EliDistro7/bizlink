@@ -2,6 +2,8 @@ const mongoose = require('mongoose');
 const Income = require('../models/Income');
 const Expense = require('../models/Expense');
 const Branch = require('../models/Branch');
+const Credit = require('../models/Credit');
+const Debt   = require('../models/Debt');
 const { resolveDateRange } = require('../utils/dateRange');
 const { success, error } = require('../utils/apiResponse');
 
@@ -337,12 +339,237 @@ const groupPendingExpenses = async (req, res) => {
   }
 };
 
+// ─── Obligations helpers ───────────────────────────────────────────────────────
+
+/**
+ * Aggregate unpaid/partial credits or debts for a given match filter.
+ * Returns { totalOwed, totalCollected, totalOverdue, overdueCount }.
+ *
+ * Uses a single $facet so we hit the collection once.
+ * The 'overdue' bucket counts documents where dueDate < now and status != 'paid'.
+ */
+const aggregateObligations = async (Model, matchFilter, amountPaidField = 'amountPaid') => {
+  const now = new Date();
+  const [result] = await Model.aggregate([
+    { $match: matchFilter },
+    {
+      $facet: {
+        totals: [
+          {
+            $group: {
+              _id: null,
+              totalOwed:      { $sum: '$amount' },
+              totalCollected: { $sum: `$${amountPaidField}` },
+            },
+          },
+        ],
+        overdue: [
+          {
+            $match: {
+              dueDate: { $lt: now },
+              status:  { $ne: 'paid' },
+            },
+          },
+          {
+            $group: {
+              _id:          null,
+              overdueTotal: { $sum: { $subtract: ['$amount', `$${amountPaidField}`] } },
+              overdueCount: { $sum: 1 },
+            },
+          },
+        ],
+      },
+    },
+  ]);
+
+  const t = result?.totals[0]  ?? {};
+  const o = result?.overdue[0] ?? {};
+
+  return {
+    totalOwed:      t.totalOwed      ?? 0,
+    totalCollected: t.totalCollected ?? 0,
+    totalOverdue:   o.overdueTotal   ?? 0,
+    overdueCount:   o.overdueCount   ?? 0,
+  };
+};
+
+/**
+ * Build per-branch obligation breakdown using a $group on branchId.
+ * Returns array sorted descending by abs(netPosition).
+ */
+const aggregateObligationsByBranch = async (Model, matchFilter, amountPaidField = 'amountPaid') => {
+  const now = new Date();
+  return Model.aggregate([
+    { $match: matchFilter },
+    {
+      $group: {
+        _id:       '$branchId',
+        remaining: { $sum: { $subtract: ['$amount', `$${amountPaidField}`] } },
+        overdue: {
+          $sum: {
+            $cond: [
+              { $and: [{ $lt: ['$dueDate', now] }, { $ne: ['$status', 'paid'] }] },
+              { $subtract: ['$amount', `$${amountPaidField}`] },
+              0,
+            ],
+          },
+        },
+      },
+    },
+    {
+      $lookup: {
+        from:         'branches',
+        localField:   '_id',
+        foreignField: '_id',
+        as:           'branch',
+      },
+    },
+    { $unwind: { path: '$branch', preserveNullAndEmptyArrays: true } },
+    {
+      $project: {
+        _id:        0,
+        branchId:   '$_id',
+        branchName: '$branch.name',
+        remaining:  1,
+        overdue:    1,
+      },
+    },
+  ]);
+};
+
+// ─── Branch obligations (/api/v1/reports/branch/:branchId/obligations) ─────────
+
+/**
+ * GET /api/v1/reports/branch/:branchId/obligations
+ *
+ * Returns pre-aggregated receivables (credits) and payables (debts)
+ * for a single branch — no pagination, no document list.
+ * The Flutter client uses these totals directly without fetching raw records.
+ */
+const branchObligations = async (req, res) => {
+  try {
+    const { branchId } = req.params;
+    const branchOid = toOid(branchId);
+
+    const openFilter = { status: { $in: ['unpaid', 'partial'] } };
+
+    const [credits, debts] = await Promise.all([
+      aggregateObligations(Credit, { branchId: branchOid, ...openFilter }),
+      aggregateObligations(Debt,   { branchId: branchOid, ...openFilter }),
+    ]);
+
+    return success(res, {
+      branchId,
+      credits: {
+        totalOwed:      credits.totalOwed,
+        totalCollected: credits.totalCollected,
+        totalOverdue:   credits.totalOverdue,
+        overdueCount:   credits.overdueCount,
+      },
+      debts: {
+        totalOwed:    debts.totalOwed,
+        totalPaid:    debts.totalCollected,
+        totalOverdue: debts.totalOverdue,
+        overdueCount: debts.overdueCount,
+      },
+    });
+  } catch (err) {
+    console.error('[reports/branch/obligations]', err.message, err.stack);
+    return error(res, 'Server error', 500);
+  }
+};
+
+// ─── Group obligations (/api/v1/reports/group/obligations) ────────────────────
+
+/**
+ * GET /api/v1/reports/group/obligations
+ *
+ * Returns group-wide receivables and payables totals, plus a per-branch
+ * breakdown — all computed server-side via aggregation.
+ * No pagination, no document lists; replaces the client fetching
+ * /admin/credits?limit=1000 and /admin/debts?limit=1000.
+ */
+const groupObligations = async (req, res) => {
+  try {
+    const openFilter = { status: { $in: ['unpaid', 'partial'] } };
+
+    const [creditTotals, debtTotals, creditsByBranch, debtsByBranch] =
+      await Promise.all([
+        aggregateObligations(Credit, openFilter),
+        aggregateObligations(Debt,   openFilter),
+        aggregateObligationsByBranch(Credit, openFilter),
+        aggregateObligationsByBranch(Debt,   openFilter),
+      ]);
+
+    // Merge per-branch credit and debt rows into a single map keyed by branchId.
+    const branchMap = new Map();
+
+    for (const row of creditsByBranch) {
+      const key = row.branchId.toString();
+      branchMap.set(key, {
+        branchId:         key,
+        branchName:       row.branchName ?? key,
+        creditsRemaining: row.remaining,
+        creditsOverdue:   row.overdue,
+        debtsRemaining:   0,
+        debtsOverdue:     0,
+      });
+    }
+
+    for (const row of debtsByBranch) {
+      const key = row.branchId.toString();
+      const existing = branchMap.get(key);
+      if (existing) {
+        existing.debtsRemaining = row.remaining;
+        existing.debtsOverdue   = row.overdue;
+      } else {
+        branchMap.set(key, {
+          branchId:         key,
+          branchName:       row.branchName ?? key,
+          creditsRemaining: 0,
+          creditsOverdue:   0,
+          debtsRemaining:   row.remaining,
+          debtsOverdue:     row.overdue,
+        });
+      }
+    }
+
+    // Sort by absolute net position descending.
+    const byBranch = [...branchMap.values()].sort(
+      (a, b) =>
+        Math.abs(b.creditsRemaining - b.debtsRemaining) -
+        Math.abs(a.creditsRemaining - a.debtsRemaining)
+    );
+
+    return success(res, {
+      credits: {
+        totalOwed:      creditTotals.totalOwed,
+        totalCollected: creditTotals.totalCollected,
+        totalOverdue:   creditTotals.totalOverdue,
+        overdueCount:   creditTotals.overdueCount,
+      },
+      debts: {
+        totalOwed:    debtTotals.totalOwed,
+        totalPaid:    debtTotals.totalCollected,
+        totalOverdue: debtTotals.totalOverdue,
+        overdueCount: debtTotals.overdueCount,
+      },
+      byBranch,
+    });
+  } catch (err) {
+    console.error('[reports/group/obligations]', err.message, err.stack);
+    return error(res, 'Server error', 500);
+  }
+};
+
 module.exports = {
   branchSummary,
   branchIncomeByCategory,
   branchExpenseByCategory,
   branchDailyTotals,
   branchPendingExpenses,
+  branchObligations,
   groupSummary,
   groupPendingExpenses,
+  groupObligations,
 };

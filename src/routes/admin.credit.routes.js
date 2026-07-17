@@ -14,9 +14,16 @@ router.get(
   authorize('super_admin'),
   [
     query('page').optional().isInt({ min: 1 }),
-    query('limit').optional().isInt({ min: 1, max: 100 }),
+    query('limit').optional().isInt({ min: 1, max: 1000 }),
     query('branchId').optional().isMongoId(),
-    query('status').optional().isIn(['unpaid', 'partial', 'paid']),
+    query('status')
+      .optional()
+      .custom((value) => {
+        const allowed = ['unpaid', 'partial', 'paid'];
+        const parts = value.split(',').map((s) => s.trim());
+        if (parts.every((p) => allowed.includes(p))) return true;
+        throw new Error(`status must be one or more of: ${allowed.join(', ')}`);
+      }),
     query('customerId').optional().isMongoId(),
     query('search').optional().trim(),
     query('startDate').optional().isISO8601(),
@@ -38,7 +45,10 @@ router.get(
 
       const filter = {};
       if (branchId)   filter.branchId   = branchId;
-      if (status)     filter.status     = status;
+      if (status) {
+        const statuses = status.split(',').map((s) => s.trim()).filter(Boolean);
+        filter.status = statuses.length === 1 ? statuses[0] : { $in: statuses };
+      }
       if (customerId) filter.customerId = customerId;
 
       if (startDate || endDate) {

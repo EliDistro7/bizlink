@@ -7,8 +7,10 @@ const {
   branchExpenseByCategory,
   branchDailyTotals,
   branchPendingExpenses,
+  branchObligations,
   groupSummary,
   groupPendingExpenses,
+  groupObligations,
 } = require('../controllers/reportController');
 
 const { authenticate, authorize } = require('../middleware/auth');
@@ -27,6 +29,13 @@ router.get(
   authenticate,
   authorize('super_admin'),
   groupPendingExpenses
+);
+
+router.get(
+  '/group/obligations',
+  authenticate,
+  authorize('super_admin'),
+  groupObligations
 );
 
 // ─── Branch-scoped routes ─────────────────────────────────────────────────────
@@ -66,6 +75,13 @@ router.get(
   authenticate,
   authorize('super_admin', 'branch_manager'),
   branchPendingExpenses
+);
+
+router.get(
+  '/branch/:branchId/obligations',
+  authenticate,
+  authorize('super_admin', 'branch_manager', 'cashier'),
+  branchObligations
 );
 
 module.exports = router;

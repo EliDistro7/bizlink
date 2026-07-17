@@ -16,8 +16,15 @@ router.get(
   [
     branchParam,
     query('page').optional().isInt({ min: 1 }),
-    query('limit').optional().isInt({ min: 1, max: 100 }),
-    query('status').optional().isIn(['unpaid', 'partial', 'paid']),
+    query('limit').optional().isInt({ min: 1, max: 500 }),
+    query('status')
+      .optional()
+      .custom((value) => {
+        const allowed = ['unpaid', 'partial', 'paid'];
+        const parts = value.split(',').map((s) => s.trim());
+        if (parts.every((p) => allowed.includes(p))) return true;
+        throw new Error(`status must be one or more of: ${allowed.join(', ')}`);
+      }),
     query('customerId').optional().trim(),
     query('search').optional().trim(),
     query('startDate').optional().isISO8601(),
