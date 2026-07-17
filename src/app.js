@@ -18,6 +18,17 @@ const adminSaleRoutes    = require('./routes/admin.sale.routes');
 const adminPurchaseRoutes = require('./routes/admin.purchase.routes');
 const adminProductRoutes  = require('./routes/admin.product.routes');
 
+const creditRoutes       = require('./routes/credit.routes');
+const creditActionRoutes = require('./routes/credit.action.routes');
+const adminCreditRoutes  = require('./routes/admin.credit.routes');
+
+const debtRoutes       = require('./routes/debt.routes');
+const debtActionRoutes = require('./routes/debt.action.routes');
+const adminDebtRoutes  = require('./routes/admin.debt.routes');
+
+const customerRoutes      = require('./routes/customer.routes');
+const adminCustomerRoutes = require('./routes/admin.customer.routes');
+
 // ── Inventory ────────────────────────────────────────────
 const productRoutes  = require('./routes/product.routes');
 const saleRoutes     = require('./routes/sale.routes');
@@ -80,6 +91,16 @@ app.use(`${API}/branches`,   purchaseRoutes);
 app.use(`${API}/admin`,      adminSaleRoutes);
 app.use(`${API}/admin`,      adminPurchaseRoutes);
 app.use(`${API}/admin`,      adminProductRoutes);
+app.use(`${API}/branches`,   customerRoutes);
+app.use(`${API}/admin`,      adminCustomerRoutes);
+
+app.use(`${API}/branches`, debtRoutes);        // GET|POST /branches/:branchId/debts
+app.use(`${API}/debts`,    debtActionRoutes);  // POST /debts/:id/payment, PATCH /debts/:id
+app.use(`${API}/admin`,    adminDebtRoutes);   // GET /admin/debts
+
+app.use(`${API}/branches`, creditRoutes);        // GET|POST /branches/:branchId/credits
+app.use(`${API}/credits`,  creditActionRoutes);  // POST /credits/:id/payment, PATCH /credits/:id
+app.use(`${API}/admin`,    adminCreditRoutes);   // GET /admin/credits
 
 app.use(notFound);
 app.use(errorHandler);
