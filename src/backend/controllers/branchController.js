@@ -89,48 +89,4 @@ const updateBranch = async (req, res) => {
   }
 };
 
-// DELETE /api/v1/branches/:id
-// Hard-deletes the branch document. Before proceeding, checks that no active
-// users are still assigned to it — a branch with active staff should be
-// deactivated (isActive: false) rather than deleted.
-const deleteBranch = async (req, res) => {
-  try {
-    const branch = await Branch.findById(req.params.id);
-    if (!branch) return error(res, 'Branch not found', 404);
-
-    // Safety guard: refuse if any active users are still assigned to this branch.
-    // Avoids orphaning user accounts and leaving them unable to log in usefully.
-    const User = require('../models/User');
-    const activeUserCount = await User.countDocuments({
-      branchId: branch._id,
-      isActive: true,
-    });
-    if (activeUserCount > 0) {
-      return error(
-        res,
-        `Cannot delete branch: ${activeUserCount} active user(s) are still assigned to it. ` +
-          'Reassign or deactivate them first, or set the branch to inactive instead.',
-        409
-      );
-    }
-
-    const snapshot = branch.toObject();
-    await branch.deleteOne();
-
-    writeAuditLog({
-      action: 'delete',
-      collection: 'branches',
-      documentId: snapshot._id,
-      actor: req.user.userId,
-      before: snapshot,
-      ip: req.ip,
-    });
-
-    return success(res, null, 204);
-  } catch (err) {
-    console.error('[branches/delete]', err);
-    return error(res, 'Server error', 500);
-  }
-};
-
-module.exports = { listBranches, createBranch, getBranch, updateBranch, deleteBranch };
+module.exports = { listBranches, createBranch, getBranch, updateBranch };

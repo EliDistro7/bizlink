@@ -8,7 +8,6 @@ const {
   createBranch,
   getBranch,
   updateBranch,
-  deleteBranch,
 } = require('../controllers/branchController');
 
 router.get('/',
@@ -44,18 +43,10 @@ router.patch('/:id',
     body('name').optional().notEmpty().trim(),
     body('location').optional().trim(),
     body('contactPhone').optional().trim(),
-    body('isActive').optional().isBoolean().toBoolean(),
+    body('isActive').optional().isBoolean(),
   ],
   validate,
   updateBranch
-);
-
-router.delete('/:id',
-  authenticate,
-  authorize('super_admin'),
-  param('id').isMongoId(),
-  validate,
-  deleteBranch
 );
 
 module.exports = router;

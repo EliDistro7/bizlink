@@ -33,21 +33,29 @@ const authorize = (...roles) => (req, res, next) => {
 
 /**
  * scopeBranch — enforces branch isolation (§7.2).
- * For branch_manager and cashier: req.params.id must match their branchId.
- * super_admin can access any branch.
+ * For branch_manager and cashier: req.params.branchId (or req.params.id)
+ * must match the branchId embedded in their JWT.
+ * super_admin bypasses this check and can access any branch.
+ *
+ * NOTE: JWT branchId is a string (serialised from ObjectId by signAccessToken).
+ * req.params values are always strings. Both sides are compared as strings —
+ * no casting needed — but we normalise with toString() as a safety net in case
+ * a future JWT change returns an ObjectId object.
  */
 const scopeBranch = (req, res, next) => {
   const { role, branchId } = req.user;
   if (role === 'super_admin') return next();
 
-
-const requestedBranch = req.params.branchId || req.params.id;
+  const requestedBranch = req.params.branchId || req.params.id;
   if (!requestedBranch) {
     return error(res, 'Branch ID is required', 400);
   }
-  if (branchId !== requestedBranch) {
+
+  // Normalise both sides to string before comparing.
+  if (branchId?.toString() !== requestedBranch) {
     return error(res, 'Access denied: you can only access your own branch', 403);
   }
+
   next();
 };
 
